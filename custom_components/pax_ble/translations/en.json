@@ -4,20 +4,21 @@
         "step": {                    
             "add_device": { 
 				"title": "Pax: Add device",
-                "description": "Enter your device details.", 
+                "description": "Add a Pax-compatible BLE fan. Use the PIN from the fan label for Calima/Svara, or pair/discover the PIN for Svensa and Levante.", 
                 "data": {                     
                     "name": "Name of device",     
                     "model": "Device model",                
                     "mac": "MAC Address (aa:bb:cc:dd:ee:ff)",                                
-                    "pin": "PIN Code",    
-                    "scan_interval": "Scan Interval in seconds",
-                    "scan_interval_fast": "Fast Scan Interval in seconds"  						
+                    "pin": "PIN code (optional for read-only)",    
+                    "scan_interval": "Normal update interval (seconds)",
+                    "scan_interval_fast": "Fast update interval after changes (seconds)"  						
                 }                                                            
             },
             "wrong_pin": {
 				"title": "Pax: Wrong PIN",
+                "description": "The fan rejected the PIN. You can enter a different PIN, try pairing, or continue read-only if you only need sensor values.",
                 "data": {
-                    "wrong_pin_selector": "Select action."    
+                    "wrong_pin_selector": "What should happen next?"    
                 }
             }
         },
@@ -35,51 +36,52 @@
     "options": {         
         "step": {
             "init": {
-				"title": "Pax BLE Configuration",
+				"title": "Pax BLE configuration",
                 "data": { 
-                    "action": "Please select the desired action."
+                    "action": "Choose what you want to manage."
                 }
             },
             "add_device": {
 				"title": "Pax BLE: Add device",
-                "description": "Enter your device details.",
+                "description": "Add another Pax-compatible BLE fan to this integration.",
                 "data": {
                     "name": "Name of device",
                     "model": "Device model",  
                     "mac": "MAC Address (aa:bb:cc:dd:ee:ff)",
-                    "pin": "PIN Code",
-                    "scan_interval": "Scan Interval in seconds",
-                    "scan_interval_fast": "Fast Scan Interval in seconds"
+                    "pin": "PIN code (optional for read-only)",
+                    "scan_interval": "Normal update interval (seconds)",
+                    "scan_interval_fast": "Fast update interval after changes (seconds)"
                 }
             },
             "wrong_pin": {
 				"title": "Pax: Wrong PIN",
+                "description": "The fan rejected the PIN. You can enter a different PIN, try pairing, or continue read-only if you only need sensor values.",
                 "data": {
-                    "wrong_pin_selector": "Select action."    
+                    "wrong_pin_selector": "What should happen next?"    
                 }
             },
             "edit_device": {
 				"title": "Pax BLE: Edit device",
-                "description": "Enter new device details for {dev_name}",
+                "description": "Update connection settings for {dev_name}. The normal interval controls regular polling; the fast interval is used briefly after changing a value.",
                 "data": {                 
                     "name": "Name of device",  
                     "model": "Device model",              
                     "mac": "MAC Address (aa:bb:cc:dd:ee:ff)",                                
-                    "pin": "PIN Code",    
-                    "scan_interval": "Scan Interval in seconds",
-                    "scan_interval_fast": "Fast Scan Interval in seconds"  	
+                    "pin": "PIN code (optional for read-only)",    
+                    "scan_interval": "Normal update interval (seconds)",
+                    "scan_interval_fast": "Fast update interval after changes (seconds)"  	
                 }                                     
             },
             "remove_device": {
                 "title": "Pax BLE: Remove device",
                 "data": {
-                    "selected_device": "Select device to remove."   
+                    "selected_device": "Device to remove"   
                 }
             },
             "select_edit_device": {
-				"title": "Pax BLE: Edit Device",
+				"title": "Pax BLE: Edit device",
                 "data": {
-                    "selected_device": "Select device to edit."    
+                    "selected_device": "Device to edit"    
                 }
             }
         },
@@ -105,9 +107,9 @@
         },
         "wrong_pin_selector": {
             "options": {
-                "accept": "Accept wrong pin",
-                "decline": "Try new pin",
-                "pair": "Start pairing"
+                "accept": "Continue read-only",
+                "decline": "Enter another PIN",
+                "pair": "Pair and retry"
             }
         }
     },

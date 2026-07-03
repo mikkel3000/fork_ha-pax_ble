@@ -12,6 +12,9 @@
 	"iot_class": "local_polling",
 	"issue_tracker": "https://github.com/eriknn/ha-pax/issues",
 	"loggers": ["custom_components.pax_ble"],
-	"requirements": ["bleak-retry-connector>=3.7.0"],
+	"requirements": [
+		"bleak-retry-connector>=3.7.0",
+		"pycalima @ git+https://github.com/mikkel3000/fork_pycalima.git"
+	],
 	"version": "1.1.23"
 }

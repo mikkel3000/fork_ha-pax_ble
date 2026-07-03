@@ -36,6 +36,25 @@ The sensors for temp/humidity/light seem to be a bit inaccurate, or I'm not conv
 The humidity sensor will show 0 when humidity is low!
 Airflow is just a conversion of the fan speed based on a linear correlation between those two. This is a bit inaccurate at best, as the true flow will vary greatly depending on how your fan is mounted.
 
+## Provided entities
+
+All supported fans provide these sensors:
+
+* Humidity
+* Temperature
+* Light
+* RPM
+* Flow
+* State
+* Mode
+
+Svensa devices also provide:
+
+* Air Quality (CO2 ppm)
+* Pause Remaining
+
+The integration also exposes device controls as switches, numbers, selects, and time entities depending on the fan model. These are used for boost mode, configured fan speeds, humidity/light sensitivity, silent hours, airing, pause, and related device settings.
+
 ## Good to know
 
 Speed and duration for boostmode are local variables in home assistant, and as such will not influence boostmode from the app. These variables will also be reset to default if you re-add a device.

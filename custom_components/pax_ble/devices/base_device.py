@@ -25,6 +25,7 @@ class BaseDevice:
     def __init__(self, hass, mac, pin):
         self._hass = hass
         self._mac = mac
+        self._mac_for_log = self._redact_mac(mac)
         self._pin = pin
         self._client: BleakClientWithServiceCache | None = None
         self._connect_lock = asyncio.Lock()
@@ -52,6 +53,13 @@ class BaseDevice:
             CHARACTERISTIC_STATUS: "25a824ad-3021-4de9-9f2f-60cf8d17bded",
         }
 
+    @staticmethod
+    def _redact_mac(mac: str) -> str:
+        parts = mac.split(":")
+        if len(parts) < 2:
+            return "<redacted>"
+        return f"**:**:**:**:{parts[-2]}:{parts[-1]}"
+
     def set_disconnect_callback(self, callback):
         """Set callback to be called when device disconnects unexpectedly."""
         self._disconnect_callback = callback
@@ -62,10 +70,18 @@ class BaseDevice:
         Only logs the disconnection for debugging purposes.
         Reconnection is handled lazily on the next poll cycle.
         """
-        _LOGGER.debug("Device %s disconnected, will reconnect on next poll", self._mac)
+        _LOGGER.debug(
+            "Device %s disconnected, will reconnect on next poll", self._mac_for_log
+        )
         self._client = None
+        if self._disconnect_callback:
+            self._hass.loop.call_soon_threadsafe(
+                self._hass.async_create_task, self._disconnect_callback()
+            )
 
     async def authorize(self):
+        if self._pin in (None, ""):
+            raise PermissionError("Device PIN is not configured")
         await self.setAuth(self._pin)
 
 
@@ -79,7 +95,7 @@ class BaseDevice:
             try:
                 device = bluetooth.async_ble_device_from_address(self._hass, self._mac.upper())
                 if not device:
-                    raise BleakError(f"Device {self._mac} not found")
+                    raise BleakError(f"Device {self._mac_for_log} not found")
 
                 try:
                     await close_stale_connections()
@@ -89,17 +105,17 @@ class BaseDevice:
                 self._client = await establish_connection(
                     BleakClientWithServiceCache,
                     device,
-                    name=getattr(self, "name", self._mac),
+                    name=getattr(self, "name", self._mac_for_log),
                     disconnected_callback=self._handle_disconnect,
                     use_services_cache=True,
                     max_attempts=5,
                     retry_interval=1.0,
                     timeout=timeout,
                 )
-                _LOGGER.debug("Connected to %s", self._mac)
+                _LOGGER.debug("Connected to %s", self._mac_for_log)
                 return True
             except Exception as err:
-                _LOGGER.warning("Failed to connect %s: %s", self._mac, err)
+                _LOGGER.warning("Failed to connect %s: %s", self._mac_for_log, err)
                 self._client = None
                 return False
 
@@ -108,7 +124,7 @@ class BaseDevice:
             try:
                 await self._client.disconnect()
             except Exception as e:
-                _LOGGER.warning("Error disconnecting %s: %s", self._mac, e)
+                _LOGGER.warning("Error disconnecting %s: %s", self._mac_for_log, e)
             finally:
                 self._client = None
 
@@ -121,7 +137,7 @@ class BaseDevice:
             raise
 
     async def pair(self) -> str:
-        raise NotImplementedError("Pairing not availiable for this device type.")
+        raise NotImplementedError("Pairing not available for this device type.")
 
     def isConnected(self) -> bool:
         return self._client is not None and self._client.is_connected
@@ -136,7 +152,9 @@ class BaseDevice:
             await asyncio.wait_for(self._client.read_gatt_char(self.chars[CHARACTERISTIC_DEVICE_NAME]), timeout=5.0)
             return True
         except Exception as e:
-            _LOGGER.debug("Connection validation failed for %s: %s", self._mac, e)
+            _LOGGER.debug(
+                "Connection validation failed for %s: %s", self._mac_for_log, e
+            )
             # Mark as disconnected so next operation will reconnect
             self._client = None
             return False
@@ -210,11 +228,13 @@ class BaseDevice:
 
     # --- Onwards to PAX characteristics
     async def setAuth(self, pin) -> None:
-        _LOGGER.debug(f"Connecting with pin: {pin}")
-        await self._writeUUID(self.chars[CHARACTERISTIC_PIN_CODE], pack("<I", int(pin)))
+        _LOGGER.debug("Authorizing device %s", self._mac_for_log)
+        await self._writeUUID(
+            self.chars[CHARACTERISTIC_PIN_CODE], pack("<I", int(pin))
+        )
 
         result = await self.checkAuth()
-        _LOGGER.debug(f"Authorized: {result}")
+        _LOGGER.debug("Authorization result for %s: %s", self._mac_for_log, result)
 
     async def getAuth(self) -> int:
         v = unpack("<I", await self._readUUID(self.chars[CHARACTERISTIC_PIN_CODE]))
@@ -233,9 +253,9 @@ class BaseDevice:
         )
 
     async def getAlias(self) -> str:
-        return await self._readUUID(self.chars[CHARACTERISTIC_FAN_DESCRIPTION]).decode(
-            "utf-8"
-        )
+        return (
+            await self._readUUID(self.chars[CHARACTERISTIC_FAN_DESCRIPTION])
+        ).decode("utf-8")
 
     async def getIsClockSet(self) -> str:
         return self._bToStr(await self._readUUID(self.chars[CHARACTERISTIC_STATUS]))

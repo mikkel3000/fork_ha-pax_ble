@@ -52,6 +52,54 @@ DEVICE_DATA = {
 _LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_device_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy with a consistently formatted MAC address."""
+    device_config = dict(user_input)
+    device_config[CONF_MAC] = dr.format_mac(device_config[CONF_MAC])
+    device_config[CONF_PIN] = str(device_config.get(CONF_PIN, "")).strip()
+    return device_config
+
+
+def _has_pin(device_config: dict[str, Any]) -> bool:
+    """Return true when the user supplied a PIN."""
+    return bool(device_config.get(CONF_PIN))
+
+
+async def _verify_pin(fan: BaseDevice, device_config: dict[str, Any], accept_wrong_pin: bool) -> bool:
+    """Authorize the fan when a PIN is configured.
+
+    A blank PIN is allowed for read-only setup.
+    """
+    if not _has_pin(device_config):
+        return True
+
+    try:
+        await fan.setAuth(device_config[CONF_PIN])
+    except ValueError:
+        return False
+
+    if accept_wrong_pin:
+        return True
+
+    return await fan.checkAuth()
+
+
+def _data_with_device(
+    entry_data: dict[str, Any], device_key: str, device_config: dict[str, Any]
+) -> dict[str, Any]:
+    """Copy config-entry data without mutating Home Assistant's stored dict."""
+    devices = dict(entry_data.get(CONF_DEVICES, {}))
+    devices[device_key] = device_config
+    return {**entry_data, CONF_DEVICES: devices}
+
+
+def _data_without_device(entry_data: dict[str, Any], device_key: str) -> dict[str, Any]:
+    """Copy config-entry data and remove one device."""
+    devices = dict(entry_data.get(CONF_DEVICES, {}))
+    devices.pop(device_key, None)
+    return {**entry_data, CONF_DEVICES: devices}
+
+
 class PaxConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     VERSION = 2
 
@@ -146,22 +194,20 @@ class PaxConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("Failed to auto-discover PIN for %s", self.device_data[CONF_MAC], exc_info=True)
 
         if user_input is not None:
-            dev_mac = dr.format_mac(user_input[CONF_MAC])
+            device_config = _normalize_device_input(user_input)
+            dev_mac = device_config[CONF_MAC]
             if self.device_exists(dev_mac):
                 return self.async_abort(
                     reason="device_already_configured",
                     description_placeholders={"dev_name": dev_mac},
                 )
 
-            fan = BaseDevice(self.hass, dev_mac, user_input[CONF_PIN])
+            fan = BaseDevice(self.hass, dev_mac, device_config[CONF_PIN])
 
             if await fan.connect():
-                await fan.setAuth(user_input[CONF_PIN])
-
-                if not self.accept_wrong_pin:
-                    pin_verified = await fan.checkAuth()
-                else:
-                    pin_verified = True
+                pin_verified = await _verify_pin(
+                    fan, device_config, self.accept_wrong_pin
+                )
                 await fan.disconnect()
 
                 if pin_verified:
@@ -171,8 +217,11 @@ class PaxConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         # No integration installed, add entry with new device
                         await self.async_set_unique_id(CONFIG_ENTRY_NAME)
                         new_data = {CONF_DEVICES: {}}
-                        new_data[CONF_DEVICES][dev_mac] = user_input
-                        _LOGGER.debug("Creating config entry: %s", new_data)
+                        new_data[CONF_DEVICES][dev_mac] = device_config
+                        _LOGGER.debug(
+                            "Creating config entry for device %s",
+                            device_config[CONF_NAME],
+                        )
 
                         return self.async_create_entry(
                             title=CONFIG_ENTRY_NAME,
@@ -183,8 +232,9 @@ class PaxConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         )
                     else:
                         # Integration found, update with new device
-                        new_data = self.config_entry.data.copy()
-                        new_data[CONF_DEVICES][dev_mac] = user_input
+                        new_data = _data_with_device(
+                            self.config_entry.data, dev_mac, device_config
+                        )
 
                         self.hass.config_entries.async_update_entry(
                             self.config_entry, data=new_data
@@ -198,18 +248,18 @@ class PaxConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         return self.async_abort(
                             reason="add_success",
                             description_placeholders={
-                                "dev_name": user_input[CONF_NAME]
+                                "dev_name": device_config[CONF_NAME]
                             },
                         )
                 else:
                     # Store values for accept / decline wrong pin
-                    self.device_data = user_input
+                    self.device_data = device_config
                     errors["base"] = "wrong_pin"
                     return await self.async_step_wrong_pin()
             else:
                 errors["base"] = "cannot_connect"
                 # Store values for new attempt
-                self.device_data = user_input
+                self.device_data = device_config
 
         data_schema = getDeviceSchemaAdd(self.device_data)
         return self.async_show_form(
@@ -277,29 +327,29 @@ class PaxOptionsFlowHandler(OptionsFlow):
         errors = {}
 
         if user_input is not None:
-            if self.device_exists(dr.format_mac(user_input[CONF_MAC])):
+            device_config = _normalize_device_input(user_input)
+            dev_mac = device_config[CONF_MAC]
+            if self.device_exists(dev_mac):
                 return self.async_abort(
                     reason="already_configured",
                     description_placeholders={
-                        "dev_name": user_input[CONF_MAC],
+                        "dev_name": dev_mac,
                     },
                 )
 
-            fan = BaseDevice(self.hass, user_input[CONF_MAC], user_input[CONF_PIN])
+            fan = BaseDevice(self.hass, dev_mac, device_config[CONF_PIN])
 
             if await fan.connect():
-                await fan.setAuth(user_input[CONF_PIN])
-
-                if not self.accept_wrong_pin:
-                    pin_verified = await fan.checkAuth()
-                else:
-                    pin_verified = True
+                pin_verified = await _verify_pin(
+                    fan, device_config, self.accept_wrong_pin
+                )
                 await fan.disconnect()
 
                 if pin_verified:
                     # Add device to config entry
-                    new_data = self.config_entry.data.copy()
-                    new_data[CONF_DEVICES][user_input[CONF_MAC]] = user_input
+                    new_data = _data_with_device(
+                        self.config_entry.data, dev_mac, device_config
+                    )
 
                     self.hass.config_entries.async_update_entry(
                         self.config_entry, data=new_data
@@ -312,20 +362,18 @@ class PaxOptionsFlowHandler(OptionsFlow):
                     return self.async_abort(
                         reason="add_success",
                         description_placeholders={
-                            "dev_name": new_data[CONF_DEVICES][user_input[CONF_MAC]][
-                                CONF_NAME
-                            ],
+                            "dev_name": new_data[CONF_DEVICES][dev_mac][CONF_NAME],
                         },
                     )
                 else:
                     # Store values for accept / decline wrong pin
-                    self.device_data = user_input
+                    self.device_data = device_config
                     errors["base"] = "wrong_pin"
                     return await self.async_step_wrong_pin()
             else:
                 errors["base"] = "cannot_connect"
                 # Store values for new attempt
-                self.device_data = user_input
+                self.device_data = device_config
 
         data_schema = getDeviceSchemaAdd(self.device_data)
         return self.async_show_form(
@@ -425,8 +473,14 @@ class PaxOptionsFlowHandler(OptionsFlow):
 
         if user_input is not None:
             # Update device in config entry
-            new_data = self.config_entry.data.copy()
-            new_data[CONF_DEVICES][self.selected_device].update(user_input)
+            new_data = _data_with_device(
+                self.config_entry.data,
+                self.selected_device,
+                {
+                    **self.config_entry.data[CONF_DEVICES][self.selected_device],
+                    **user_input,
+                },
+            )
             self.hass.config_entries.async_update_entry(
                 self.config_entry, data=new_data
             )
@@ -464,8 +518,9 @@ class PaxOptionsFlowHandler(OptionsFlow):
             ]
 
             # Remove device from config entry
-            new_data = self.config_entry.data.copy()
-            new_data[CONF_DEVICES].pop(self.selected_device)
+            new_data = _data_without_device(
+                self.config_entry.data, self.selected_device
+            )
 
             await self.async_remove_device(
                 self.config_entry.entry_id, self.selected_device
@@ -544,7 +599,7 @@ def getDeviceSchemaAdd(user_input: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(
                 CONF_MAC, description="MAC Address", default=user_input[CONF_MAC]
             ): cv.string,
-            vol.Required(
+            vol.Optional(
                 CONF_PIN, description="Pin Code", default=user_input[CONF_PIN]
             ): cv.string,
             vol.Optional(
@@ -563,7 +618,7 @@ def getDeviceSchemaAdd(user_input: dict[str, Any] | None = None) -> vol.Schema:
 def getDeviceSchemaEdit(user_input: dict[str, Any] | None = None) -> vol.Schema:
     data_schema = vol.Schema(
         {
-            vol.Required(
+            vol.Optional(
                 CONF_PIN, description="Pin Code", default=user_input[CONF_PIN]
             ): cv.string,
             vol.Optional(
