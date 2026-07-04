@@ -169,6 +169,9 @@ class BaseCoordinator(DataUpdateCoordinator, ABC):
         # Check if we're already connected and validate the connection
         if self._fan.isConnected():
             if await self._fan.validate_connection():
+                if not await self._fan.ensure_authorized():
+                    _LOGGER.warning("Authorization failed for %s", self.devicename)
+                    return False
                 # Reset failure count on successful validation
                 if self._connection_failures > 0:
                     _LOGGER.info("Connection to %s validated, resetting failure count", self.devicename)
@@ -182,11 +185,11 @@ class BaseCoordinator(DataUpdateCoordinator, ABC):
             timeout = 45 if self._connection_failures > 2 else 30
             if await self._fan.connect(timeout=timeout):
                 # Validate the new connection
-                if await self._fan.validate_connection():
+                if await self._fan.validate_connection() and await self._fan.ensure_authorized():
                     self._connection_failures = 0
                     return True
                 else:
-                    _LOGGER.warning("New connection failed validation")
+                    _LOGGER.warning("New connection failed validation or authorization")
                     return False
             else:
                 return False

@@ -28,6 +28,7 @@ class BaseDevice:
         self._mac_for_log = self._redact_mac(mac)
         self._pin = pin
         self._client: BleakClientWithServiceCache | None = None
+        self._authorized = False
         self._connect_lock = asyncio.Lock()
         self._disconnect_callback = None
         # Characteristic UUIDs (centralized in characteristics.py ideally)
@@ -74,6 +75,7 @@ class BaseDevice:
             "Device %s disconnected, will reconnect on next poll", self._mac_for_log
         )
         self._client = None
+        self._authorized = False
         if self._disconnect_callback:
             self._hass.loop.call_soon_threadsafe(
                 self._hass.async_create_task, self._disconnect_callback()
@@ -83,6 +85,20 @@ class BaseDevice:
         if self._pin in (None, ""):
             raise PermissionError("Device PIN is not configured")
         await self.setAuth(self._pin)
+        self._authorized = await self.checkAuth()
+        if not self._authorized:
+            raise PermissionError("Device PIN authorization failed")
+
+    async def ensure_authorized(self) -> bool:
+        """Authorize once per BLE connection when a PIN is configured."""
+        if self._pin in (None, ""):
+            return True
+        if self._authorized:
+            return True
+
+        await self.setAuth(self._pin)
+        self._authorized = await self.checkAuth()
+        return self._authorized
 
 
     async def connect(self, timeout: int = 45) -> bool:
@@ -113,6 +129,7 @@ class BaseDevice:
                     timeout=timeout,
                 )
                 _LOGGER.debug("Connected to %s", self._mac_for_log)
+                self._authorized = False
                 return True
             except Exception as err:
                 _LOGGER.warning("Failed to connect %s: %s", self._mac_for_log, err)
@@ -127,6 +144,7 @@ class BaseDevice:
                 _LOGGER.warning("Error disconnecting %s: %s", self._mac_for_log, e)
             finally:
                 self._client = None
+                self._authorized = False
 
     async def _with_disconnect_on_error(self, coro):
         try:
